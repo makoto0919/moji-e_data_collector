@@ -217,7 +217,7 @@
   // ===== 状態 =====
   const state = {
     workerId: loadLocal("workerId") || "",
-    pairsUrl: loadLocal("pairsUrl") || "",
+    pairsUrl: loadLocal("pairsUrl") || "https://makoto0919.github.io/moji-e_data_collector/data/pairs.json",
     pairs: [],          // {pairId, char, svgUrl}
     viewBox: { w: 1000, h: 700 },
     currentChar: HIRAGANA[0],
@@ -856,11 +856,10 @@
     updateHeader(null);
 
     if (state.pairsUrl) {
-      // 自動読み込みしたいならここを有効化してOK
-      // await loadPairs(state.pairsUrl);
-      setHint("pairs.json URLを確認して「読み込み」を押してください。");
+      await loadPairs(state.pairsUrl);
+    } else {
+      setHint("pairs.json URLを入力して「読み込み」を押してください。");
     }
-    await refreshProgress();
   })();
 
 })();
