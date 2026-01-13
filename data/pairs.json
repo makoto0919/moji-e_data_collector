@@ -2,7 +2,7 @@
   {
     "pairId": "pair_000001",
     "char": "あ",
-    "svgUrl": "../refs/crab.svg",
+    "svgUrl": "https://makoto0919.github.io/moji-e_data_collector/refs/crab.svg",
     "meta": {
       "source": "sketch_A",
       "strokeCountHint": 3
