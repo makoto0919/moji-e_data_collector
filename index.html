@@ -336,10 +336,31 @@
   }
 
   function clientToViewBox(e) {
-    const rect = drawSvg.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width * state.viewBox.w;
-    const y = (e.clientY - rect.top) / rect.height * state.viewBox.h;
-    return { x, y };
+    // stage内での座標
+    const rect = stage.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+
+    // SVGが実際に描画される領域（preserveAspectRatio="xMidYMid meet" を反映）
+    const vbW = state.viewBox.w;
+    const vbH = state.viewBox.h;
+
+    const scale = Math.min(rect.width / vbW, rect.height / vbH);
+    const drawW = vbW * scale;
+    const drawH = vbH * scale;
+
+    const offsetX = (rect.width - drawW) / 2;
+    const offsetY = (rect.height - drawH) / 2;
+
+    // 余白を除いたSVG内部座標
+    const sx = (cx - offsetX) / scale;
+    const sy = (cy - offsetY) / scale;
+
+    // viewBox の minX/minY も反映（将来のため）
+    const minX = state.viewBox.minX || 0;
+    const minY = state.viewBox.minY || 0;
+
+    return { x: minX + sx, y: minY + sy };
   }
 
   function vbToNorm(pt) {
