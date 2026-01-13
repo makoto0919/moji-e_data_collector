@@ -425,7 +425,7 @@
         return r.text();
       });
       applyReferenceFromSvgText(svgText);
-      setHint(`文字「${pair.char}」をなぞってください。<br/>保存でIndexedDBに記録します。`);
+      setHint(`画像のストロークにできるだけ沿うように<br/>文字「${pair.char}」を書いてください。<br/>保存でIndexedDBに記録します。`);
     } catch (e) {
       refLayer.innerHTML = "";
       setHint(`お手本SVGの読み込みに失敗しました。<br/>${escapeHtml(String(e))}`);
