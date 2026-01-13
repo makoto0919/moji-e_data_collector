@@ -435,63 +435,44 @@
   function applyReferenceFromSvgText(svgText) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(svgText, "image/svg+xml");
-    const svg = doc.querySelector("svg");
-    if (!svg) throw new Error("SVGタグが見つかりませんでした。");
+    const srcSvg = doc.querySelector("svg");
+    if (!srcSvg) throw new Error("SVGタグが見つかりませんでした。");
 
     // viewBox取得（なければ width/height）
-    let vb = svg.getAttribute("viewBox");
-    let w = 1000, h = 700;
+    let vb = srcSvg.getAttribute("viewBox");
+    let minX = 0, minY = 0, w = 1000, h = 700;
+
     if (vb) {
       const parts = vb.trim().split(/\s+|,/).map(Number);
       if (parts.length === 4 && parts.every(n => Number.isFinite(n))) {
-        w = parts[2]; h = parts[3];
+        [minX, minY, w, h] = parts;
       }
     } else {
-      const sw = Number(svg.getAttribute("width"));
-      const sh = Number(svg.getAttribute("height"));
+      const sw = Number(srcSvg.getAttribute("width"));
+      const sh = Number(srcSvg.getAttribute("height"));
       if (Number.isFinite(sw) && Number.isFinite(sh)) { w = sw; h = sh; }
-    }
-    setViewBox(w, h);
-
-    // ---- ここが重要：非表示(pathのdisplay:none)は除外する ----
-    const srcPaths = Array.from(svg.querySelectorAll("path"));
-
-    const visibleDs = [];
-    for (const p of srcPaths) {
-      const d = p.getAttribute("d");
-      if (!d) continue;
-
-      // display 判定：style="display:none" または display="none" を除外
-      const dispAttr = (p.getAttribute("display") || "").trim().toLowerCase();
-      if (dispAttr === "none") continue;
-
-      const styleAttr = (p.getAttribute("style") || "").toLowerCase().replace(/\s/g, "");
-      if (styleAttr.includes("display:none")) continue;
-
-      // もし親(g)にdisplay:noneが付いてるケースもあるので、それも見る（念のため）
-      const parent = p.closest("[style],[display]");
-      if (parent && parent !== p) {
-        const pd = (parent.getAttribute("display") || "").trim().toLowerCase();
-        if (pd === "none") continue;
-        const ps = (parent.getAttribute("style") || "").toLowerCase().replace(/\s/g, "");
-        if (ps.includes("display:none")) continue;
-      }
-
-      visibleDs.push(d);
+      // viewBoxが無いなら付けて扱う
+      srcSvg.setAttribute("viewBox", `0 0 ${w} ${h}`);
     }
 
-    // 表示
+    // あなたの座標系は 0 0 w h 前提なので minX/minY がある場合は保持しておく
+    state.viewBox = { w, h, minX, minY };
+    refSvg.setAttribute("viewBox", `${minX} ${minY} ${w} ${h}`);
+    drawSvg.setAttribute("viewBox", `${minX} ${minY} ${w} ${h}`);
+
+    // ★ここが肝：参照SVGの中身を「そのまま」移植（display:noneも保持）
     refLayer.innerHTML = "";
-    for (const d of visibleDs) {
-      const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      p.setAttribute("d", d);
-      p.setAttribute("fill", "none");
-      p.setAttribute("stroke", "rgba(110,231,255,.55)");
-      p.setAttribute("stroke-width", "4");
-      p.setAttribute("stroke-linecap", "round");
-      p.setAttribute("stroke-linejoin", "round");
-      refLayer.appendChild(p);
-    }
+    const imported = document.importNode(srcSvg, true);
+
+    // srcSvgの子要素を refLayer に入れる（<svg>ごと入れない）
+    while (imported.firstChild) refLayer.appendChild(imported.firstChild);
+
+    // ★半透明は refSvg の opacity ですでに効いてる（あなたのCSSで opacity:.55）
+    // 追加で薄くしたければ refLayer側でOK
+    // refLayer.setAttribute("opacity", "0.55");
+
+    // ★色を水色にしたい場合：スタイルを壊さず「CSSで上書き」するのが安全
+    // ここでは何も上書きしない（ブラウザと同じ表示を優先）
   }
 
   function escapeHtml(s) {
