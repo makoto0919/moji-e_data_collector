@@ -1,0 +1,20 @@
+[
+  {
+    "pairId": "pair_000001",
+    "char": "あ",
+    "svgUrl": "refs/pair_000001.svg",
+    "meta": {
+      "source": "sketch_A",
+      "strokeCountHint": 3
+    }
+  },
+  {
+    "pairId": "pair_000002",
+    "char": "あ",
+    "svgUrl": "refs/pair_000002.svg",
+    "meta": {
+      "source": "sketch_B",
+      "strokeCountHint": 4
+    }
+  }
+]
