@@ -128,7 +128,7 @@
       <svg id="drawSvg" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet"
            style="position:absolute; inset:0; width:100%; height:100%;">
         <g id="strokesLayer"></g>
-        <path id="livePath" fill="none" stroke="rgba(110,231,255,.95)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"></path>
+        <path id="livePath" fill="none" stroke="rgba(110,231,255,.95)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
       </svg>
 
       <div class="hint" id="hintBox">
@@ -373,7 +373,7 @@
       path.setAttribute("d", pointsToPathD(vbPoints));
       path.setAttribute("fill", "none");
       path.setAttribute("stroke", "rgba(232,234,240,.95)");
-      path.setAttribute("stroke-width", "6");
+      path.setAttribute("stroke-width", "3");
       path.setAttribute("stroke-linecap", "round");
       path.setAttribute("stroke-linejoin", "round");
       strokesLayer.appendChild(path);
@@ -465,7 +465,7 @@
       p.setAttribute("d", d);
       p.setAttribute("fill", "none");
       p.setAttribute("stroke", "rgba(110,231,255,.55)");
-      p.setAttribute("stroke-width", "8");
+      p.setAttribute("stroke-width", "4");
       p.setAttribute("stroke-linecap", "round");
       p.setAttribute("stroke-linejoin", "round");
       refLayer.appendChild(p);
