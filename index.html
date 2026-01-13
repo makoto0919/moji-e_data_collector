@@ -453,14 +453,36 @@
     }
     setViewBox(w, h);
 
-    // path抽出（必要なら line/polyline 追加可）
-    const paths = Array.from(svg.querySelectorAll("path"))
-      .map(p => p.getAttribute("d"))
-      .filter(Boolean);
+    // ---- ここが重要：非表示(pathのdisplay:none)は除外する ----
+    const srcPaths = Array.from(svg.querySelectorAll("path"));
+
+    const visibleDs = [];
+    for (const p of srcPaths) {
+      const d = p.getAttribute("d");
+      if (!d) continue;
+
+      // display 判定：style="display:none" または display="none" を除外
+      const dispAttr = (p.getAttribute("display") || "").trim().toLowerCase();
+      if (dispAttr === "none") continue;
+
+      const styleAttr = (p.getAttribute("style") || "").toLowerCase().replace(/\s/g, "");
+      if (styleAttr.includes("display:none")) continue;
+
+      // もし親(g)にdisplay:noneが付いてるケースもあるので、それも見る（念のため）
+      const parent = p.closest("[style],[display]");
+      if (parent && parent !== p) {
+        const pd = (parent.getAttribute("display") || "").trim().toLowerCase();
+        if (pd === "none") continue;
+        const ps = (parent.getAttribute("style") || "").toLowerCase().replace(/\s/g, "");
+        if (ps.includes("display:none")) continue;
+      }
+
+      visibleDs.push(d);
+    }
 
     // 表示
     refLayer.innerHTML = "";
-    for (const d of paths) {
+    for (const d of visibleDs) {
       const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
       p.setAttribute("d", d);
       p.setAttribute("fill", "none");
