@@ -1,0 +1,869 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Hiragana Stroke Tracing Collector (SVG ref + IndexedDB)</title>
+  <style>
+    :root { --bg:#0b0c10; --panel:#11131a; --text:#e8eaf0; --muted:#a6adbb; --accent:#6ee7ff; --danger:#ff6b6b; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; background:var(--bg); color:var(--text); }
+    header { padding:12px 14px 10px; display:flex; gap:12px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; }
+    .title { display:flex; gap:12px; align-items:baseline; flex-wrap:wrap; }
+    .char { font-size:28px; font-weight:750; letter-spacing:0.05em; }
+    .meta { color:var(--muted); font-size:12px; line-height:1.4; }
+    .wrap { padding:0 14px 14px; }
+    .panel { background:var(--panel); border-radius:14px; padding:12px; box-shadow:0 12px 40px rgba(0,0,0,.35); }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .between { justify-content:space-between; }
+    .badge { padding:6px 10px; border-radius:999px; font-size:12px; color:var(--muted); border:1px solid rgba(255,255,255,.12); }
+    .field { display:flex; gap:8px; align-items:center; font-size:12px; color:var(--muted); }
+    input, select {
+      background:#0f1320; color:var(--text); border:1px solid rgba(255,255,255,.12);
+      border-radius:10px; padding:10px 12px; font-size:14px;
+    }
+    button {
+      border:0; padding:12px 14px; border-radius:12px; font-size:14px; font-weight:650;
+      color:var(--text); background:#1a1f2b; cursor:pointer;
+    }
+    button:active { transform: translateY(1px); }
+    .primary { background: linear-gradient(135deg, #1b3a55, #134b5a); border:1px solid rgba(110,231,255,.25); }
+    .danger { background:#3a1b1b; border:1px solid rgba(255,107,107,.25); }
+    .ghost { background:transparent; border:1px solid rgba(255,255,255,.12); }
+    .stage {
+      width:100%;
+      height:min(72vh, 760px);
+      background:#070810;
+      border-radius:14px;
+      overflow:hidden;
+      position:relative;
+      border:1px solid rgba(255,255,255,.08);
+      touch-action:none;
+    }
+    .hint {
+      position:absolute; inset:auto 10px 10px auto;
+      background: rgba(17,19,26,.72); border:1px solid rgba(255,255,255,.10);
+      padding:8px 10px; border-radius:12px; font-size:12px; color:var(--muted);
+      backdrop-filter: blur(10px);
+      max-width:min(320px, 90vw);
+      line-height:1.45;
+    }
+    .small { font-size:12px; color:var(--muted); line-height:1.6; }
+    code { color:#c7d2fe; }
+    .hr { height:1px; background:rgba(255,255,255,.08); margin:10px 0; }
+  </style>
+</head>
+<body>
+<header>
+  <div class="title">
+    <div class="char" id="charLabel">—</div>
+    <div class="meta" id="metaLabel">
+      pair: — · saved: —<br/>
+      worker: —
+    </div>
+  </div>
+  <div class="row">
+    <span class="badge" id="strokeBadge">strokes: 0</span>
+    <span class="badge" id="pointBadge">points: 0</span>
+    <span class="badge" id="queueBadge">db: 0</span>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="panel">
+    <div class="row between">
+      <div class="row">
+        <div class="field">
+          作業者ID
+          <input id="workerId" placeholder="例) worker_01" style="width:160px" />
+        </div>
+        <div class="field">
+          pairs.json URL
+          <input id="pairsUrl" placeholder="https://.../data/pairs.json" style="width:min(520px, 70vw)" />
+        </div>
+        <button class="ghost" id="loadPairsBtn">読み込み</button>
+      </div>
+      <div class="row">
+        <button class="ghost" id="prevPairBtn">← 前ペア</button>
+        <button class="ghost" id="nextPairBtn">次ペア →</button>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <div class="field">
+        対象文字
+        <select id="charSelect"></select>
+      </div>
+      <div class="field">
+        目標/文字
+        <input id="targetPerChar" type="number" min="1" value="2000" style="width:100px" />
+      </div>
+      <div class="field">
+        この文字でペアをランダム
+        <select id="randomMode" style="width:120px">
+          <option value="on">ON</option>
+          <option value="off">OFF</option>
+        </select>
+      </div>
+      <div class="field">
+        フィルタ
+        <select id="filterMode" style="width:160px">
+          <option value="all">全て</option>
+          <option value="only_current_char">選択文字のみ</option>
+        </select>
+      </div>
+      <button class="ghost" id="refreshProgressBtn">進捗更新</button>
+    </div>
+
+    <div class="hr"></div>
+
+    <div class="stage" id="stage">
+      <!-- reference layer -->
+      <svg id="refSvg" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet"
+           style="position:absolute; inset:0; width:100%; height:100%; opacity:.55; pointer-events:none;">
+        <g id="refLayer"></g>
+      </svg>
+
+      <!-- drawing layer -->
+      <svg id="drawSvg" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet"
+           style="position:absolute; inset:0; width:100%; height:100%;">
+        <g id="strokesLayer"></g>
+        <path id="livePath" fill="none" stroke="rgba(110,231,255,.95)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>
+
+      <div class="hint" id="hintBox">
+        1) pairs.json を読み込み<br/>
+        2) Apple Pencilでなぞる<br/>
+        3) 「保存して次へ」で自動保存（IndexedDB）<br/>
+        4) 最後に「エクスポート」でまとめて回収
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:12px;">
+      <button id="undoBtn">一画戻る</button>
+      <button class="danger" id="resetBtn">リセット</button>
+      <button class="primary" id="saveNextBtn">保存して次へ</button>
+      <button id="skipBtn">スキップ（保存せず次）</button>
+      <button class="ghost" id="exportAllBtn">エクスポート（全件JSONL）</button>
+      <button class="ghost" id="exportCharBtn">エクスポート（この文字JSONL）</button>
+      <button class="danger" id="dangerClearBtn">DB全消去</button>
+    </div>
+
+    <div class="small" style="margin-top:10px;">
+      ・保存形式：<b>1サンプル=1レコード</b>（筆順付き点列）をIndexedDBへ自動保存。<br/>
+      ・エクスポート：<code>jsonl</code>（1行1JSON）で出力します（巨大でも扱いやすい）。<br/>
+      ・座標：お手本SVGの <code>viewBox</code> を基準にし、保存時は <code>x,y</code> を0〜1で正規化します。
+    </div>
+
+    <div class="hr"></div>
+
+    <div class="small" id="progressBox">
+      進捗：pairs.json未読み込み
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ===== ひらがな一覧（ユーザー指定） =====
+  const HIRAGANA = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをんがぎぐげござじずぜぞだぢづでどばびぶべぼ".split("");
+
+  // ===== DOM =====
+  const charLabel = document.getElementById("charLabel");
+  const metaLabel = document.getElementById("metaLabel");
+  const strokeBadge = document.getElementById("strokeBadge");
+  const pointBadge = document.getElementById("pointBadge");
+  const queueBadge = document.getElementById("queueBadge");
+  const hintBox = document.getElementById("hintBox");
+
+  const workerIdInput = document.getElementById("workerId");
+  const pairsUrlInput = document.getElementById("pairsUrl");
+  const loadPairsBtn = document.getElementById("loadPairsBtn");
+
+  const charSelect = document.getElementById("charSelect");
+  const targetPerChar = document.getElementById("targetPerChar");
+  const randomModeSel = document.getElementById("randomMode");
+  const filterModeSel = document.getElementById("filterMode");
+  const refreshProgressBtn = document.getElementById("refreshProgressBtn");
+
+  const prevPairBtn = document.getElementById("prevPairBtn");
+  const nextPairBtn = document.getElementById("nextPairBtn");
+
+  const stage = document.getElementById("stage");
+  const refSvg = document.getElementById("refSvg");
+  const refLayer = document.getElementById("refLayer");
+  const drawSvg = document.getElementById("drawSvg");
+  const strokesLayer = document.getElementById("strokesLayer");
+  const livePath = document.getElementById("livePath");
+
+  const undoBtn = document.getElementById("undoBtn");
+  const resetBtn = document.getElementById("resetBtn");
+  const saveNextBtn = document.getElementById("saveNextBtn");
+  const skipBtn = document.getElementById("skipBtn");
+  const exportAllBtn = document.getElementById("exportAllBtn");
+  const exportCharBtn = document.getElementById("exportCharBtn");
+  const dangerClearBtn = document.getElementById("dangerClearBtn");
+
+  const progressBox = document.getElementById("progressBox");
+
+  // ===== 初期化：セレクト =====
+  for (const ch of HIRAGANA) {
+    const opt = document.createElement("option");
+    opt.value = ch;
+    opt.textContent = ch;
+    charSelect.appendChild(opt);
+  }
+
+  // ===== 状態 =====
+  const state = {
+    workerId: loadLocal("workerId") || "",
+    pairsUrl: loadLocal("pairsUrl") || "",
+    pairs: [],          // {pairId, char, svgUrl}
+    viewBox: { w: 1000, h: 700 },
+    currentChar: HIRAGANA[0],
+    currentPairIndex: 0,
+    // drawing
+    strokes: [],        // {tool, points:[{x,y,t,p}] } (normalized)
+    live: { active:false, pointerId:null, startedAt:0, pointsVB:[] }, // viewBox points while drawing
+  };
+
+  workerIdInput.value = state.workerId;
+  pairsUrlInput.value = state.pairsUrl;
+  charSelect.value = state.currentChar;
+
+  // ===== IndexedDB =====
+  const DB_NAME = "hiragana_stroke_collector_v1";
+  const DB_VERSION = 1;
+  const STORE = "samples";
+  let db = null;
+
+  // Schema: keyPath sampleId
+  function openDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = () => {
+        const d = req.result;
+        if (!d.objectStoreNames.contains(STORE)) {
+          const store = d.createObjectStore(STORE, { keyPath: "sampleId" });
+          store.createIndex("by_worker", "workerId", { unique:false });
+          store.createIndex("by_char", "char", { unique:false });
+          store.createIndex("by_pair", "pairId", { unique:false });
+          store.createIndex("by_worker_char", ["workerId", "char"], { unique:false });
+          store.createIndex("by_createdAt", "createdAt", { unique:false });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function tx(storeName, mode="readonly") {
+    const t = db.transaction(storeName, mode);
+    return t.objectStore(storeName);
+  }
+
+  async function dbCountAll() {
+    return new Promise((resolve, reject) => {
+      const req = tx(STORE).count();
+      req.onsuccess = () => resolve(req.result || 0);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function dbAddSample(sample) {
+    return new Promise((resolve, reject) => {
+      const req = tx(STORE, "readwrite").add(sample);
+      req.onsuccess = () => resolve(true);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function dbClearAll() {
+    return new Promise((resolve, reject) => {
+      const req = tx(STORE, "readwrite").clear();
+      req.onsuccess = () => resolve(true);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function dbGetAllAsArray() {
+    return new Promise((resolve, reject) => {
+      const req = tx(STORE).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function dbGetByWorkerChar(workerId, ch) {
+    return new Promise((resolve, reject) => {
+      const idx = tx(STORE).index("by_worker_char");
+      const req = idx.getAll(IDBKeyRange.only([workerId, ch]));
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function dbCountsByCharForWorker(workerId) {
+    // returns Map(char -> count)
+    const all = await dbGetAllAsArray();
+    const m = new Map();
+    for (const r of all) {
+      if (r.workerId !== workerId) continue;
+      m.set(r.char, (m.get(r.char) || 0) + 1);
+    }
+    return m;
+  }
+
+  // ===== Utils =====
+  function saveLocal(k, v) { localStorage.setItem(k, v); }
+  function loadLocal(k) { return localStorage.getItem(k); }
+
+  function nowISO() { return new Date().toISOString(); }
+  function randId() { return Math.random().toString(16).slice(2); }
+
+  function guessDevice() {
+    const ua = navigator.userAgent || "";
+    if (/iPad|Macintosh/.test(ua) && "ontouchend" in document) return "iPadOS";
+    if (/iPhone/.test(ua)) return "iPhone";
+    if (/Android/.test(ua)) return "Android";
+    return "Unknown";
+  }
+
+  function setViewBox(w, h) {
+    state.viewBox = { w, h };
+    refSvg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    drawSvg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  }
+
+  function clientToViewBox(e) {
+    const rect = drawSvg.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width * state.viewBox.w;
+    const y = (e.clientY - rect.top) / rect.height * state.viewBox.h;
+    return { x, y };
+  }
+
+  function vbToNorm(pt) {
+    return { x: pt.x / state.viewBox.w, y: pt.y / state.viewBox.h };
+  }
+
+  function pointsToPathD(pointsVB) {
+    if (!pointsVB.length) return "";
+    const p0 = pointsVB[0];
+    let d = `M ${p0.x.toFixed(2)} ${p0.y.toFixed(2)}`;
+    for (let i = 1; i < pointsVB.length; i++) {
+      const p = pointsVB[i];
+      d += ` L ${p.x.toFixed(2)} ${p.y.toFixed(2)}`;
+    }
+    return d;
+  }
+
+  function clearDrawing() {
+    state.strokes = [];
+    state.live = { active:false, pointerId:null, startedAt:0, pointsVB:[] };
+    livePath.setAttribute("d", "");
+    strokesLayer.innerHTML = "";
+    updateBadges();
+  }
+
+  function renderStrokes() {
+    strokesLayer.innerHTML = "";
+    for (const stroke of state.strokes) {
+      const vbPoints = stroke.points.map(p => ({ x: p.x * state.viewBox.w, y: p.y * state.viewBox.h }));
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", pointsToPathD(vbPoints));
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", "rgba(232,234,240,.95)");
+      path.setAttribute("stroke-width", "6");
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+      strokesLayer.appendChild(path);
+    }
+    updateBadges();
+  }
+
+  function updateBadges() {
+    strokeBadge.textContent = `strokes: ${state.strokes.length}`;
+    const fixedPoints = state.strokes.reduce((sum, s) => sum + s.points.length, 0);
+    const livePoints = state.live.pointsVB?.length || 0;
+    pointBadge.textContent = `points: ${fixedPoints + livePoints}`;
+  }
+
+  async function updateDBBadge() {
+    const c = await dbCountAll();
+    queueBadge.textContent = `db: ${c}`;
+  }
+
+  function updateHeader(savedCountForChar = null) {
+    const pair = getCurrentPair();
+    const pairId = pair ? pair.pairId : "—";
+    const ch = pair ? pair.char : state.currentChar;
+    const worker = state.workerId || "—";
+    const target = Number(targetPerChar.value || 2000);
+
+    charLabel.textContent = ch || "—";
+    if (savedCountForChar == null) {
+      metaLabel.innerHTML = `pair: ${pairId} · saved: —/${target}<br/>worker: ${worker}`;
+    } else {
+      metaLabel.innerHTML = `pair: ${pairId} · saved: ${savedCountForChar}/${target}<br/>worker: ${worker}`;
+    }
+  }
+
+  function setHint(text) {
+    hintBox.innerHTML = text;
+  }
+
+  // ===== Reference SVG loading =====
+  async function loadReferenceSvgForPair(pair) {
+    if (!pair) {
+      refLayer.innerHTML = "";
+      setHint("pairs.json未読み込み、またはペアがありません。");
+      return;
+    }
+    try {
+      const svgText = await fetch(pair.svgUrl, { cache:"no-store" }).then(r => {
+        if (!r.ok) throw new Error(`fetch failed: ${r.status}`);
+        return r.text();
+      });
+      applyReferenceFromSvgText(svgText);
+      setHint(`文字「${pair.char}」をなぞってください。<br/>保存でIndexedDBに記録します。`);
+    } catch (e) {
+      refLayer.innerHTML = "";
+      setHint(`お手本SVGの読み込みに失敗しました。<br/>${escapeHtml(String(e))}`);
+    }
+  }
+
+  function applyReferenceFromSvgText(svgText) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(svgText, "image/svg+xml");
+    const svg = doc.querySelector("svg");
+    if (!svg) throw new Error("SVGタグが見つかりませんでした。");
+
+    // viewBox取得（なければ width/height）
+    let vb = svg.getAttribute("viewBox");
+    let w = 1000, h = 700;
+    if (vb) {
+      const parts = vb.trim().split(/\s+|,/).map(Number);
+      if (parts.length === 4 && parts.every(n => Number.isFinite(n))) {
+        w = parts[2]; h = parts[3];
+      }
+    } else {
+      const sw = Number(svg.getAttribute("width"));
+      const sh = Number(svg.getAttribute("height"));
+      if (Number.isFinite(sw) && Number.isFinite(sh)) { w = sw; h = sh; }
+    }
+    setViewBox(w, h);
+
+    // path抽出（必要なら line/polyline 追加可）
+    const paths = Array.from(svg.querySelectorAll("path"))
+      .map(p => p.getAttribute("d"))
+      .filter(Boolean);
+
+    // 表示
+    refLayer.innerHTML = "";
+    for (const d of paths) {
+      const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      p.setAttribute("d", d);
+      p.setAttribute("fill", "none");
+      p.setAttribute("stroke", "rgba(110,231,255,.55)");
+      p.setAttribute("stroke-width", "8");
+      p.setAttribute("stroke-linecap", "round");
+      p.setAttribute("stroke-linejoin", "round");
+      refLayer.appendChild(p);
+    }
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+  }
+
+  // ===== Pair selection logic =====
+  function getFilteredPairs() {
+    const mode = filterModeSel.value;
+    if (mode === "only_current_char") {
+      const ch = charSelect.value;
+      return state.pairs.filter(p => p.char === ch);
+    }
+    return state.pairs;
+  }
+
+  function getCurrentPair() {
+    const list = getFilteredPairs();
+    if (!list.length) return null;
+    const idx = Math.max(0, Math.min(state.currentPairIndex, list.length - 1));
+    state.currentPairIndex = idx;
+    return list[idx];
+  }
+
+  function jumpToPairIndex(idx) {
+    const list = getFilteredPairs();
+    if (!list.length) return;
+    state.currentPairIndex = ((idx % list.length) + list.length) % list.length;
+  }
+
+  function pickNextPairIndex() {
+    const list = getFilteredPairs();
+    if (!list.length) return 0;
+    if (randomModeSel.value === "on") {
+      return Math.floor(Math.random() * list.length);
+    }
+    return (state.currentPairIndex + 1) % list.length;
+  }
+
+  function pickPrevPairIndex() {
+    const list = getFilteredPairs();
+    if (!list.length) return 0;
+    if (randomModeSel.value === "on") {
+      return Math.floor(Math.random() * list.length);
+    }
+    return (state.currentPairIndex - 1 + list.length) % list.length;
+  }
+
+  async function showCurrentPair(resetDrawing = true) {
+    const pair = getCurrentPair();
+    if (!pair) {
+      updateHeader(null);
+      return;
+    }
+    state.currentChar = pair.char;
+    charSelect.value = pair.char;
+    if (resetDrawing) clearDrawing();
+    await loadReferenceSvgForPair(pair);
+
+    // saved count for current char (worker-specific)
+    const worker = state.workerId || "";
+    let savedCount = null;
+    if (worker) {
+      const recs = await dbGetByWorkerChar(worker, pair.char);
+      savedCount = recs.length;
+    }
+    updateHeader(savedCount);
+    await updateDBBadge();
+  }
+
+  // ===== Drawing via Pointer Events =====
+  stage.addEventListener("pointerdown", (e) => {
+    stage.setPointerCapture(e.pointerId);
+    state.live.active = true;
+    state.live.pointerId = e.pointerId;
+    state.live.pointsVB = [];
+    state.live.startedAt = performance.now();
+
+    const vb = clientToViewBox(e);
+    pushLivePoint(vb, e);
+    updateLivePath();
+  });
+
+  stage.addEventListener("pointermove", (e) => {
+    if (!state.live.active || e.pointerId !== state.live.pointerId) return;
+    const vb = clientToViewBox(e);
+    pushLivePoint(vb, e);
+    updateLivePath();
+  });
+
+  stage.addEventListener("pointerup", (e) => {
+    if (!state.live.active || e.pointerId !== state.live.pointerId) return;
+    finalizeStroke();
+  });
+
+  stage.addEventListener("pointercancel", (e) => {
+    if (!state.live.active || e.pointerId !== state.live.pointerId) return;
+    finalizeStroke();
+  });
+
+  function pushLivePoint(vb, e) {
+    const t = performance.now() - state.live.startedAt;
+    const p = typeof e.pressure === "number" ? e.pressure : null;
+    state.live.pointsVB.push({ x: vb.x, y: vb.y, t, p });
+  }
+
+  function updateLivePath() {
+    livePath.setAttribute("d", pointsToPathD(state.live.pointsVB));
+    updateBadges();
+  }
+
+  function finalizeStroke() {
+    const pts = state.live.pointsVB;
+    state.live.active = false;
+    state.live.pointerId = null;
+    livePath.setAttribute("d", "");
+
+    if (!pts || pts.length < 2) {
+      updateBadges();
+      return;
+    }
+
+    // normalize and store
+    const norm = pts.map(p => {
+      const n = vbToNorm(p);
+      return { x: n.x, y: n.y, t: Math.round(p.t), p: p.p };
+    });
+
+    state.strokes.push({ tool:"pen", points:norm });
+    renderStrokes();
+  }
+
+  // ===== Save sample =====
+  function buildSampleRecord(pair) {
+    const createdAt = nowISO();
+    const sampleId = `${createdAt}__${pair.pairId}__${state.workerId || "worker_unknown"}__${randId()}`;
+    const device = guessDevice();
+
+    const totalPoints = state.strokes.reduce((sum, s) => sum + s.points.length, 0);
+
+    return {
+      sampleId,
+      createdAt,
+      workerId: state.workerId || "worker_unknown",
+      char: pair.char,
+      pairId: pair.pairId,
+      svgUrl: pair.svgUrl,
+      viewBox: { ...state.viewBox },
+      strokes: state.strokes,
+      stats: {
+        strokeCount: state.strokes.length,
+        pointCount: totalPoints
+      },
+      meta: {
+        device,
+        userAgent: navigator.userAgent
+      }
+    };
+  }
+
+  function basicQualityCheck() {
+    if (state.strokes.length === 0) return { ok:false, msg:"ストロークが0です。" };
+    const pts = state.strokes.reduce((s, st) => s + st.points.length, 0);
+    if (pts < 12) return { ok:false, msg:"点数が少なすぎます（誤タップの可能性）。" };
+    return { ok:true, msg:"ok" };
+  }
+
+  async function saveAndNext() {
+    const pair = getCurrentPair();
+    if (!pair) return;
+
+    if (!state.workerId) {
+      alert("作業者IDを入れてください（例: worker_01）。");
+      return;
+    }
+
+    const qc = basicQualityCheck();
+    if (!qc.ok) {
+      const go = confirm(`${qc.msg}\nそれでも保存しますか？`);
+      if (!go) return;
+    }
+
+    const rec = buildSampleRecord(pair);
+    await dbAddSample(rec);
+
+    // next pair
+    const nextIdx = pickNextPairIndex();
+    jumpToPairIndex(nextIdx);
+    await showCurrentPair(true);
+    await refreshProgress();
+  }
+
+  async function skipNext() {
+    const nextIdx = pickNextPairIndex();
+    jumpToPairIndex(nextIdx);
+    await showCurrentPair(true);
+  }
+
+  // ===== Progress =====
+  async function refreshProgress() {
+    if (!db || !state.workerId) {
+      progressBox.textContent = "進捗：作業者ID未設定、またはDB未初期化";
+      return;
+    }
+    const target = Number(targetPerChar.value || 2000);
+    const m = await dbCountsByCharForWorker(state.workerId);
+    const parts = [];
+    let total = 0;
+
+    for (const ch of HIRAGANA) {
+      const c = m.get(ch) || 0;
+      total += c;
+      if (c > 0) parts.push(`${ch}:${c}/${target}`);
+    }
+
+    const current = charSelect.value;
+    const curCount = m.get(current) || 0;
+
+    progressBox.innerHTML =
+      `進捗（worker: <code>${escapeHtml(state.workerId)}</code>） 合計 <b>${total}</b> 件<br/>` +
+      `選択文字「<b>${escapeHtml(current)}</b>」: <b>${curCount}</b> / ${target}<br/>` +
+      (parts.length ? `記録済み: ${parts.join(" · ")}` : "記録済み: まだありません");
+  }
+
+  // ===== Export =====
+  function toJSONL(records) {
+    return records.map(r => JSON.stringify(r)).join("\n") + (records.length ? "\n" : "");
+  }
+
+  function downloadText(text, filename, mime="text/plain") {
+    const blob = new Blob([text], { type:mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function exportAll() {
+    const records = await dbGetAllAsArray();
+    const jsonl = toJSONL(records);
+    const fname = `samples_all_${nowISO().replaceAll(":","-")}.jsonl`;
+    downloadText(jsonl, fname, "application/x-ndjson");
+  }
+
+  async function exportCurrentChar() {
+    if (!state.workerId) {
+      alert("作業者IDを入れてください。");
+      return;
+    }
+    const ch = charSelect.value;
+    const records = await dbGetByWorkerChar(state.workerId, ch);
+    const jsonl = toJSONL(records);
+    const fname = `samples_${state.workerId}_${ch}_${nowISO().replaceAll(":","-")}.jsonl`;
+    downloadText(jsonl, fname, "application/x-ndjson");
+  }
+
+  // ===== Events =====
+  workerIdInput.addEventListener("input", async () => {
+    state.workerId = workerIdInput.value.trim();
+    saveLocal("workerId", state.workerId);
+    await showCurrentPair(false);
+    await refreshProgress();
+  });
+
+  pairsUrlInput.addEventListener("input", () => {
+    state.pairsUrl = pairsUrlInput.value.trim();
+    saveLocal("pairsUrl", state.pairsUrl);
+  });
+
+  loadPairsBtn.addEventListener("click", async () => {
+    const url = pairsUrlInput.value.trim();
+    if (!url) { alert("pairs.json URLを入力してください。"); return; }
+    await loadPairs(url);
+  });
+
+  charSelect.addEventListener("change", async () => {
+    // filterが「選択文字のみ」の場合、リストが変わるので index を0に
+    if (filterModeSel.value === "only_current_char") {
+      state.currentPairIndex = 0;
+      await showCurrentPair(true);
+    } else {
+      // current pair の char と揃えるため、選択した文字を優先してペアを探す
+      const ch = charSelect.value;
+      const list = getFilteredPairs();
+      const idx = list.findIndex(p => p.char === ch);
+      if (idx >= 0) state.currentPairIndex = idx;
+      await showCurrentPair(true);
+    }
+    await refreshProgress();
+  });
+
+  filterModeSel.addEventListener("change", async () => {
+    state.currentPairIndex = 0;
+    await showCurrentPair(true);
+  });
+
+  randomModeSel.addEventListener("change", async () => {
+    // 動作切り替えのみ
+  });
+
+  refreshProgressBtn.addEventListener("click", refreshProgress);
+
+  prevPairBtn.addEventListener("click", async () => {
+    const prevIdx = pickPrevPairIndex();
+    jumpToPairIndex(prevIdx);
+    await showCurrentPair(true);
+  });
+
+  nextPairBtn.addEventListener("click", async () => {
+    const nextIdx = pickNextPairIndex();
+    jumpToPairIndex(nextIdx);
+    await showCurrentPair(true);
+  });
+
+  undoBtn.addEventListener("click", () => {
+    state.strokes.pop();
+    renderStrokes();
+  });
+
+  resetBtn.addEventListener("click", () => {
+    clearDrawing();
+    updateHeader(null);
+  });
+
+  saveNextBtn.addEventListener("click", saveAndNext);
+  skipBtn.addEventListener("click", skipNext);
+
+  exportAllBtn.addEventListener("click", exportAll);
+  exportCharBtn.addEventListener("click", exportCurrentChar);
+
+  dangerClearBtn.addEventListener("click", async () => {
+    const ok = confirm("IndexedDBの全データを削除します。よろしいですか？");
+    if (!ok) return;
+    await dbClearAll();
+    await updateDBBadge();
+    await refreshProgress();
+    alert("DBを全消去しました。");
+  });
+
+  // ===== Load pairs =====
+  async function loadPairs(url) {
+    try {
+      setHint("pairs.json を読み込み中…");
+      const pairs = await fetch(url, { cache:"no-store" }).then(r => {
+        if (!r.ok) throw new Error(`pairs.json fetch failed: ${r.status}`);
+        return r.json();
+      });
+
+      // validate & normalize svgUrl relative resolution
+      const base = new URL(url, location.href);
+      const normalized = [];
+      for (const p of pairs) {
+        if (!p || !p.pairId || !p.char || !p.svgUrl) continue;
+        const svgUrl = new URL(p.svgUrl, base).toString();
+        normalized.push({ pairId: String(p.pairId), char: String(p.char), svgUrl });
+      }
+      if (!normalized.length) throw new Error("有効なペアが見つかりませんでした（pairId/char/svgUrl必須）。");
+
+      state.pairs = normalized;
+
+      // start at first occurrence of selected char if possible
+      const ch = charSelect.value;
+      const idx = state.pairs.findIndex(x => x.char === ch);
+      state.currentPairIndex = idx >= 0 ? idx : 0;
+
+      setHint(`pairs.json 読み込み完了（${state.pairs.length}件）。<br/>最初のペアを表示します。`);
+      await showCurrentPair(true);
+      await refreshProgress();
+    } catch (e) {
+      setHint(`pairs.json 読み込み失敗：<br/>${escapeHtml(String(e))}`);
+    }
+  }
+
+  // ===== Boot =====
+  (async () => {
+    db = await openDB();
+    await updateDBBadge();
+
+    // show initial header
+    updateHeader(null);
+
+    if (state.pairsUrl) {
+      // 自動読み込みしたいならここを有効化してOK
+      // await loadPairs(state.pairsUrl);
+      setHint("pairs.json URLを確認して「読み込み」を押してください。");
+    }
+    await refreshProgress();
+  })();
+
+})();
+</script>
+</body>
+</html>
