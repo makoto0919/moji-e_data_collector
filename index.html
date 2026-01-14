@@ -168,6 +168,24 @@
   // ===== ひらがな一覧（ユーザー指定） =====
   const HIRAGANA = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをんがぎぐげござじずぜぞだぢづでどばびぶべぼ".split("");
 
+  // ひらがな画数（一般的な筆順の目安）
+  const STROKE_HINT = {
+    "あ": 3, "い": 2, "う": 2, "え": 2, "お": 3,
+    "か": 3, "き": 4, "く": 1, "け": 3, "こ": 2,
+    "さ": 3, "し": 1, "す": 2, "せ": 3, "そ": 1,
+    "た": 4, "ち": 2, "つ": 1, "て": 1, "と": 2,
+    "な": 4, "に": 3, "ぬ": 2, "ね": 2, "の": 1,
+    "は": 3, "ひ": 1, "ふ": 4, "へ": 1, "ほ": 4,
+    "ま": 3, "み": 2, "む": 3, "め": 2, "も": 3,
+    "や": 3, "ゆ": 2, "よ": 2,
+    "ら": 2, "り": 2, "る": 1, "れ": 2, "ろ": 1,
+    "わ": 2, "を": 3, "ん": 1,
+    "が": 5, "ぎ": 6, "ぐ": 3, "げ": 5, "ご": 4,
+    "ざ": 5, "じ": 3, "ず": 4, "ぜ": 5, "ぞ": 3,
+    "だ": 6, "ぢ": 4, "づ": 3, "で": 3, "ど": 4,
+    "ば": 5, "び": 3, "ぶ": 6, "べ": 3, "ぼ": 6,
+  };
+
   // ===== DOM =====
   const charLabel = document.getElementById("charLabel");
   const metaLabel = document.getElementById("metaLabel");
@@ -403,7 +421,15 @@
   }
 
   function updateBadges() {
-    strokeBadge.textContent = `strokes: ${state.strokes.length}`;
+    const pair = getCurrentPair();
+    const expected = pair ? STROKE_HINT[pair.char] : null;
+
+    if (expected != null) {
+      strokeBadge.textContent = `strokes: ${state.strokes.length}/${expected}`;
+    } else {
+      strokeBadge.textContent = `strokes: ${state.strokes.length}`;
+    }
+
     const fixedPoints = state.strokes.reduce((sum, s) => sum + s.points.length, 0);
     const livePoints = state.live.pointsVB?.length || 0;
     pointBadge.textContent = `points: ${fixedPoints + livePoints}`;
@@ -682,6 +708,14 @@
 
   async function saveAndNext() {
     const pair = getCurrentPair();
+    const expected = STROKE_HINT[pair.char];
+    if (expected != null) {
+      const actual = state.strokes.length;
+      if (actual !== expected) {
+        alert(`画数が違います。\n文字「${pair.char}」 期待: ${expected}画 / 今: ${actual}画\n描き直してください。`);
+        return; // 保存しない
+      }
+    }
     if (!pair) return;
 
     if (!state.workerId) {
